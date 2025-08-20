@@ -1,4 +1,5 @@
 from ieee import AuthorPage, PublicationPage
+import utils
 from .cli_plugin_base import CLIPluginBase
 from dataclasses import asdict
 import json
@@ -139,7 +140,11 @@ class IEEEPlugin(CLIPluginBase):
                     cacher.save(key, info, ttl=ttl)
                     logger.debug("Saved publication info to cache.")
             if info:
-                logger.debug("Publication info ready.")
+                # ensure check present (PublicationPage already computes, but guard)
+                try:
+                    info.check = utils._compute_paper_check(info)
+                except Exception:
+                    info.check = getattr(info, "check", 0)
                 logger.info(
                     "Publication info:\n"
                     + json.dumps(json_safe(info), ensure_ascii=False, indent=2)
@@ -179,10 +184,15 @@ class IEEEPlugin(CLIPluginBase):
                         )
                         # attach ids to author object
                         info.publication_ids = ids
-                    # save author object (with publication_ids if present) into cache
-                    ttl = getattr(args, "cache_ttl", None)
-                    cacher.save(key, info, ttl=ttl)
-                    logger.debug("Saved author object to cache.")
+                        # compute check for author now that publication_ids are attached
+                        try:
+                            info.check = utils._compute_author_check(info)
+                        except Exception:
+                            info.check = getattr(info, "check", 0)
+                # cache/save will include info.check
+                ttl = getattr(args, "cache_ttl", None)
+                cacher.save(key, info, ttl=ttl)
+                logger.debug("Saved author object to cache.")
             if info:
                 logger.info(
                     "Author info:\n"
@@ -235,6 +245,7 @@ class IEEEPlugin(CLIPluginBase):
             )
             if args.save_db and ids:
                 for pid in ids:
+                    # stub paper: check will be computed in db.save_paper based on fields (likely 0)
                     db.save_paper(
                         db.PaperMetaData(
                             id=pid,
@@ -243,9 +254,6 @@ class IEEEPlugin(CLIPluginBase):
                         strategy=getattr(args, "strategy", "AN"),
                         logger=logger,
                     )
-                logger.info(
-                    f"Saved {len(ids)} publication IDs to database as stub papers (db_path={args.db_path})."
-                )
         else:
             logger.error("No ieee sub-command specified. Use --help for usage.")
 

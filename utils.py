@@ -34,3 +34,40 @@ def retry_with_exponential_backoff(func, max_retries=3, base_delay=2):
                 f"Playwright NetWork Error, R: ({attempt + 1}/{max_retries}), W{delay}: {e}"
             )
             time.sleep(delay)
+
+
+def _is_default(val):
+    return val is None or val == "" or val == [] or val == {}
+
+
+def _compute_author_check(author):
+    name = getattr(author, "name", None)
+    aff = getattr(author, "affiliation", None)
+    pubids = getattr(author, "publication_ids", None)
+    return (
+        1
+        if (not _is_default(name) and not _is_default(aff) and not _is_default(pubids))
+        else 0
+    )
+
+
+def _compute_paper_check(paper):
+    title = getattr(paper, "title", None)
+    abstract = getattr(paper, "abstract", None)
+    pubdate = getattr(paper, "publication_date", None)
+    doi = getattr(paper, "doi", None)
+    pubtitle = getattr(paper, "publication_title", None)
+    authors = getattr(paper, "authors", None)
+    return (
+        1
+        if (
+            not _is_default(title)
+            and not _is_default(abstract)
+            and not _is_default(pubdate)
+            and not _is_default(doi)
+            and not _is_default(pubtitle)
+            and authors
+            and len(authors) > 0
+        )
+        else 0
+    )

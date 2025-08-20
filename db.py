@@ -3,10 +3,9 @@ import json
 from datetime import datetime
 import typing
 import os
-import time
-import functools
 import logging
 from T import IEEEAuthor, PaperMetaData
+import utils
 
 # get database path from environment variable
 DB_PATH = os.environ.get("DB_PATH", "ieee.db")
@@ -57,7 +56,8 @@ def init_db(
             author_id TEXT PRIMARY KEY,
             name TEXT,
             affiliation TEXT,
-            publication_ids TEXT
+            publication_ids TEXT,
+            "check" INTEGER
         )
     """)
     c.execute("""
@@ -67,7 +67,8 @@ def init_db(
             abstract TEXT,
             publication_date TEXT,
             doi TEXT UNIQUE,
-            publication_title TEXT
+            publication_title TEXT,
+            "check" INTEGER
         )
     """)
     c.execute("""
@@ -77,11 +78,14 @@ def init_db(
             PRIMARY KEY (paper_id, author_id)
         )
     """)
-    # ensure older DBs get the new column if missing (safe to ignore failure)
+    # ensure older DBs get the new columns if missing (safe to ignore failure)
     try:
-        c.execute("ALTER TABLE author ADD COLUMN publication_ids TEXT")
+        c.execute('ALTER TABLE author ADD COLUMN "check" INTEGER')
     except Exception:
-        # column likely exists or SQLite version/other issue; ignore
+        pass
+    try:
+        c.execute('ALTER TABLE paper ADD COLUMN "check" INTEGER')
+    except Exception:
         pass
     c.execute("CREATE INDEX IF NOT EXISTS idx_author_id ON author(author_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_doi ON paper(doi)")
@@ -92,11 +96,6 @@ def init_db(
     logger.info("Database initialized.")
 
 
-# New helper to detect "default" value
-def _is_default(val):
-    return val is None or val == "" or val == [] or val == {}
-
-
 def _choose_value(field_name: str, old, new, strategy: str) -> typing.Any:
     """
     Decide which value to keep for a single field according to strategy.
@@ -104,9 +103,9 @@ def _choose_value(field_name: str, old, new, strategy: str) -> typing.Any:
     AN: use new
     M: ask user
     """
-    if _is_default(old) and not _is_default(new):
+    if utils._is_default(old) and not utils._is_default(new):
         return new
-    if _is_default(new) and not _is_default(old):
+    if utils._is_default(new) and not utils._is_default(old):
         return old
     if old == new:
         return old
@@ -159,18 +158,20 @@ def save_or_update_author(
         (author.author_id,),
     )
     row = c.fetchone()
+    author_checked = utils._compute_author_check(author)
     if not row:
         logger.info(f"Author {author.author_id} not found, inserting.")
         c.execute(
             """
-            INSERT INTO author (author_id, name, affiliation, publication_ids)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO author (author_id, name, affiliation, publication_ids, "check")
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 author.author_id,
                 author.name,
                 json.dumps(getattr(author, "affiliation", [])),
                 json.dumps(getattr(author, "publication_ids", [])),
+                author_checked,
             ),
         )
         conn.commit()
@@ -199,15 +200,31 @@ def save_or_update_author(
         "publication_ids", old_pub_ids, getattr(author, "publication_ids", []), strategy
     )
 
+    # compute chosen checked value based on chosen fields
+    chosen_author = IEEEAuthor(
+        author_id=author.author_id, name=name_chosen, affiliation=aff_chosen
+    )
+    try:
+        chosen_author.publication_ids = pubids_chosen
+    except Exception:
+        pass
+    chosen_checked = utils._compute_author_check(chosen_author)
+
     # update if any change
-    if name_chosen != old_name or aff_chosen != old_aff or pubids_chosen != old_pub_ids:
+    if (
+        name_chosen != old_name
+        or aff_chosen != old_aff
+        or pubids_chosen != old_pub_ids
+        or chosen_checked != (row[3] if len(row) > 3 else 0)
+    ):
         logger.info(f"Updating author {author.author_id}")
         c.execute(
-            "UPDATE author SET name=?, affiliation=?, publication_ids=? WHERE author_id=?",
+            'UPDATE author SET name=?, affiliation=?, publication_ids=?, "check"=? WHERE author_id=?',
             (
                 name_chosen,
                 json.dumps(aff_chosen),
                 json.dumps(pubids_chosen),
+                chosen_checked,
                 author.author_id,
             ),
         )
@@ -245,12 +262,13 @@ def save_paper(
         (paper.id,),
     )
     row = c.fetchone()
+    paper_checked = utils._compute_paper_check(paper)
     if not row:
         logger.info(f"Inserting new paper {paper.id}")
         c.execute(
             """
-            INSERT INTO paper (id, title, abstract, publication_date, doi, publication_title)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO paper (id, title, abstract, publication_date, doi, publication_title, "check")
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 paper.id,
@@ -265,6 +283,7 @@ def save_paper(
                 ),
                 paper.doi,
                 paper.publication_title,
+                paper_checked,
             ),
         )
     else:
@@ -298,13 +317,28 @@ def save_paper(
         )
 
         c.execute(
-            "UPDATE paper SET title=?, abstract=?, publication_date=?, doi=?, publication_title=? WHERE id=?",
+            'UPDATE paper SET title=?, abstract=?, publication_date=?, doi=?, publication_title=?, "check"=? WHERE id=?',
             (
                 title_chosen,
                 abstract_chosen,
                 pubdate_chosen,
                 doi_chosen,
                 pubtitle_chosen,
+                utils._compute_paper_check(
+                    PaperMetaData(
+                        id=paper.id,
+                        title=title_chosen,
+                        abstract=abstract_chosen,
+                        authors=getattr(paper, "authors", []),
+                        doi=doi_chosen,
+                        publication_title=pubtitle_chosen,
+                        publication_date=(
+                            datetime.fromisoformat(pubdate_chosen)
+                            if pubdate_chosen
+                            else datetime.now()
+                        ),
+                    )
+                ),
                 paper.id,
             ),
         )
@@ -373,7 +407,7 @@ def get_author_by_id(
     conn = get_conn(db_path)
     c = conn.cursor()
     c.execute(
-        "SELECT author_id, name, affiliation, publication_ids FROM author WHERE author_id=?",
+        'SELECT author_id, name, affiliation, publication_ids, "check" FROM author WHERE author_id=?',
         (author_id,),
     )
     row = c.fetchone()
@@ -382,11 +416,13 @@ def get_author_by_id(
         aff = json.loads(row[2]) if row[2] else []
         pub_ids = json.loads(row[3]) if row[3] else []
         author = IEEEAuthor(row[0], row[1], aff)
-        # attach publication_ids if dataclass doesn't accept it in ctor
         try:
             author.publication_ids = pub_ids
         except Exception:
-            # fallback: ignore if attribute cannot be set
+            pass
+        try:
+            author.check = int(row[4]) if row[4] is not None else 0
+        except Exception:
             pass
         return author
     return None
@@ -481,7 +517,7 @@ def get_paper_by_id(
     conn = get_conn(db_path)
     c = conn.cursor()
     c.execute(
-        "SELECT id, title, abstract, publication_date, doi, publication_title FROM paper WHERE id=?",
+        'SELECT id, title, abstract, publication_date, doi, publication_title, "check" FROM paper WHERE id=?',
         (paper_id,),
     )
     paper_row = c.fetchone()
@@ -506,6 +542,10 @@ def get_paper_by_id(
     )
     if paper_row[3]:
         pm.publication_date = datetime.fromisoformat(paper_row[3])
+    try:
+        pm.check = int(paper_row[6]) if paper_row[6] is not None else 0
+    except Exception:
+        pass
 
     return pm
 
@@ -638,19 +678,22 @@ def export_db(
     conn = get_conn(db_path)
     c = conn.cursor()
     # Export authors
-    c.execute("SELECT author_id, name, affiliation, publication_ids FROM author")
+    c.execute(
+        'SELECT author_id, name, affiliation, publication_ids, "check" FROM author'
+    )
     authors = [
         {
             "author_id": row[0],
             "name": row[1],
             "affiliation": json.loads(row[2]) if row[2] else [],
             "publication_ids": json.loads(row[3]) if row[3] else [],
+            "check": int(row[4]) if row[4] is not None else 0,
         }
         for row in c.fetchall()
     ]
     # Export papers
     c.execute(
-        "SELECT id, title, abstract, publication_date, doi, publication_title FROM paper"
+        'SELECT id, title, abstract, publication_date, doi, publication_title, "check" FROM paper'
     )
     papers = []
     for paper_row in c.fetchall():
@@ -666,6 +709,7 @@ def export_db(
                 "publication_date": paper_row[3],
                 "doi": paper_row[4],
                 "publication_title": paper_row[5],
+                "check": int(paper_row[6]) if paper_row[6] is not None else 0,
                 "authors": author_ids,
             }
         )
@@ -687,7 +731,9 @@ def get_all_authors(db_path: typing.Optional[str] = None) -> list[IEEEAuthor]:
     """
     conn = get_conn(db_path)
     c = conn.cursor()
-    c.execute("SELECT author_id, name, affiliation, publication_ids FROM author")
+    c.execute(
+        'SELECT author_id, name, affiliation, publication_ids, "check" FROM author'
+    )
     rows = c.fetchall()
     conn.close()
     authors = []
@@ -697,6 +743,10 @@ def get_all_authors(db_path: typing.Optional[str] = None) -> list[IEEEAuthor]:
         author = IEEEAuthor(r[0], r[1], aff)
         try:
             author.publication_ids = pub_ids
+        except Exception:
+            pass
+        try:
+            author.check = int(r[4]) if r[4] is not None else 0
         except Exception:
             pass
         authors.append(author)
@@ -714,7 +764,7 @@ def get_all_papers(db_path: typing.Optional[str] = None) -> list[PaperMetaData]:
     conn = get_conn(db_path)
     c = conn.cursor()
     c.execute(
-        "SELECT id, title, abstract, publication_date, doi, publication_title FROM paper"
+        'SELECT id, title, abstract, publication_date, doi, publication_title, "check" FROM paper'
     )
     papers = []
     for paper_row in c.fetchall():
@@ -737,6 +787,28 @@ def get_all_papers(db_path: typing.Optional[str] = None) -> list[PaperMetaData]:
         )
         if paper_row[3]:
             pm.publication_date = datetime.fromisoformat(paper_row[3])
+        try:
+            pm.check = int(paper_row[6]) if paper_row[6] is not None else 0
+        except Exception:
+            pass
         papers.append(pm)
     conn.close()
     return papers
+
+
+def get_unchecked_authors(db_path: typing.Optional[str] = None) -> list[str]:
+    conn = get_conn(db_path)
+    c = conn.cursor()
+    c.execute('SELECT author_id FROM author WHERE "check" IS NULL OR "check" != 1')
+    rows = [r[0] for r in c.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_unchecked_papers(db_path: typing.Optional[str] = None) -> list[str]:
+    conn = get_conn(db_path)
+    c = conn.cursor()
+    c.execute('SELECT id FROM paper WHERE "check" IS NULL OR "check" != 1')
+    rows = [r[0] for r in c.fetchall()]
+    conn.close()
+    return rows

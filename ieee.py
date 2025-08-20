@@ -33,6 +33,43 @@ def get_next_sibling_element(el: ElementHandle) -> typing.Optional[ElementHandle
     return None
 
 
+def _is_default(val):
+    return val is None or val == "" or val == [] or val == {}
+
+
+def _compute_author_check(author: T.IEEEAuthor) -> int:
+    name = getattr(author, "name", None)
+    aff = getattr(author, "affiliation", None)
+    pubids = getattr(author, "publication_ids", None)
+    return (
+        1
+        if (not _is_default(name) and not _is_default(aff) and not _is_default(pubids))
+        else 0
+    )
+
+
+def _compute_paper_check(paper: T.PaperMetaData) -> int:
+    title = getattr(paper, "title", None)
+    abstract = getattr(paper, "abstract", None)
+    pubdate = getattr(paper, "publication_date", None)
+    doi = getattr(paper, "doi", None)
+    pubtitle = getattr(paper, "publication_title", None)
+    authors = getattr(paper, "authors", None)
+    return (
+        1
+        if (
+            not _is_default(title)
+            and not _is_default(abstract)
+            and not _is_default(pubdate)
+            and not _is_default(doi)
+            and not _is_default(pubtitle)
+            and authors
+            and len(authors) > 0
+        )
+        else 0
+    )
+
+
 class PublicationPage:
     def __init__(self, browser: Browser, publication_id: str, logger: logging.Logger):
         self.browser = browser
@@ -117,7 +154,7 @@ class PublicationPage:
 
                 # here is a ugly patch, because there are different layout for maybe
                 # if the paper is in Early Access, if not, author picture will be displayed
-                qk = "col-14-24" if ea == "" else "col-24-24"
+                qk = "col-14-24" if not ea else "col-24-24"
                 for el_author in el_authors:
                     author_info = T.IEEEAuthor(name="", affiliation=[], author_id="")
                     el_author_name = el_author.query_selector(f"div.{qk} a")
@@ -142,6 +179,12 @@ class PublicationPage:
                             f"Author affiliation: {author_info.affiliation}"
                         )
                     publication_info.authors.append(author_info)
+
+            # set paper.check based on collected fields/authors
+            try:
+                publication_info.check = _compute_paper_check(publication_info)
+            except Exception:
+                publication_info.check = 0
 
             self.logger.info("Publication info extraction completed.")
             return publication_info
@@ -182,6 +225,11 @@ class AuthorPage:
                 divs = el_affiliation_parent.query_selector_all("div")
                 author_info.affiliation = [div.inner_text() for div in divs if div]
                 self.logger.debug(f"Author affiliation: {author_info.affiliation}")
+
+            try:
+                author_info.check = _compute_author_check(author_info)
+            except Exception:
+                author_info.check = 0
 
             self.logger.info("Author info extraction completed.")
             return author_info
