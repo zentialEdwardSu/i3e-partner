@@ -1,13 +1,16 @@
 from ieee import AuthorPage, PublicationPage
-import utils
+import utils as utils
 from .cli_plugin_base import CLIPluginBase
 from dataclasses import asdict
 import json
 import logging
 from playwright.sync_api import sync_playwright
-import db
 from cache import Cacher, make_cache_key
 from datetime import datetime  # added
+from .params_mounter import (
+    mount_year_params,
+    mount_sharing_params,
+)
 
 
 class IEEEPlugin(CLIPluginBase):
@@ -25,73 +28,26 @@ class IEEEPlugin(CLIPluginBase):
         fetch_parser.add_argument(
             "--publication-id", required=True, help="Publication ID"
         )
-        fetch_parser.add_argument(
-            "--save-db", action="store_true", help="Save to database"
-        )
-        fetch_parser.add_argument("--db-path", type=str, help="Database path")
-        fetch_parser.add_argument(
-            "--cache-ttl",
-            type=int,
-            default=None,
-            help="Cache TTL in seconds (optional)",
-        )
-        fetch_parser.add_argument(
-            "--strategy",
-            choices=["AO", "AN", "M"],
-            default="AN",
-            help="Conflict resolution strategy when saving (AO=Always Old, AN=Always New, M=Manual)",
-        )
+        mount_sharing_params(fetch_parser)
 
         # get_author_info
         author_parser = subparsers.add_parser("author", help="Fetch author info")
         author_parser.add_argument("--author-id", required=True, help="Author ID")
         author_parser.add_argument(
-            "--save-db", action="store_true", help="Save to database"
-        )
-        author_parser.add_argument("--db-path", type=str, help="Database path")
-        author_parser.add_argument(
             "--no-pub-list",
             action="store_true",
             help="Do not fetch published work id list",
         )
-        author_parser.add_argument("--start-year", type=int, help="Start year")
-        author_parser.add_argument("--end-year", type=int, help="End year")
-        author_parser.add_argument(
-            "--cache-ttl",
-            type=int,
-            default=None,
-            help="Cache TTL in seconds (optional)",
-        )
-        author_parser.add_argument(
-            "--strategy",
-            choices=["AO", "AN", "M"],
-            default="AN",
-            help="Conflict resolution strategy when saving (AO=Always Old, AN=Always New, M=Manual)",
-        )
+        mount_year_params(author_parser)
+        mount_sharing_params(author_parser)
 
         # get_published_work_id_list
         pub_list_parser = subparsers.add_parser(
             "publist", help="Get published work IDs for author"
         )
         pub_list_parser.add_argument("--author-id", required=True, help="Author ID")
-        pub_list_parser.add_argument("--start-year", type=int, help="Start year")
-        pub_list_parser.add_argument("--end-year", type=int, help="End year")
-        pub_list_parser.add_argument(
-            "--save-db", action="store_true", help="Save to database"
-        )
-        pub_list_parser.add_argument("--db-path", type=str, help="Database path")
-        pub_list_parser.add_argument(
-            "--cache-ttl",
-            type=int,
-            default=None,
-            help="Cache TTL in seconds (optional)",
-        )
-        pub_list_parser.add_argument(
-            "--strategy",
-            choices=["AO", "AN", "M"],
-            default="AN",
-            help="Conflict resolution strategy when saving (AO=Always Old, AN=Always New, M=Manual)",
-        )
+        mount_year_params(pub_list_parser)
+        mount_sharing_params(pub_list_parser)
 
     def __init__(self, logger=None):
         super().__init__(logger)
@@ -150,15 +106,16 @@ class IEEEPlugin(CLIPluginBase):
                     + json.dumps(json_safe(info), ensure_ascii=False, indent=2)
                 )
                 if args.save_db:
-                    db.save_paper(
-                        info,
-                        db_path=args.db_path,
-                        strategy=getattr(args, "strategy", "AN"),
-                        logger=logger,
-                    )
-                    logger.info(
-                        f"Saved publication info to database (db_path={args.db_path})."
-                    )
+                    logger.warning("Save to db is temporarily disabled.")
+                    # db.save_paper(
+                    #     info,
+                    #     db_path=args.db_path,
+                    #     strategy=getattr(args, "strategy", "AN"),
+                    #     logger=logger,
+                    # )
+                    # logger.info(
+                    #     f"Saved publication info to database (db_path={args.db_path})."
+                    # )
             else:
                 logger.warning("No publication info found.")
         elif args.ieee_command == "author":
@@ -204,16 +161,17 @@ class IEEEPlugin(CLIPluginBase):
                         + json.dumps(json_safe(ids), ensure_ascii=False, indent=2)
                     )
                 if args.save_db:
+                    logger.warning("Save to db is temporarily disabled.")
                     # use save_or_update_author to allow passing strategy
-                    db.save_or_update_author(
-                        info,
-                        db_path=args.db_path,
-                        strategy=getattr(args, "strategy", "AN"),
-                        logger=logger,
-                    )
-                    logger.info(
-                        f"Saved author info to database (db_path={args.db_path})."
-                    )
+                    # db.save_or_update_author(
+                    #     info,
+                    #     db_path=args.db_path,
+                    #     strategy=getattr(args, "strategy", "AN"),
+                    #     logger=logger,
+                    # )
+                    # logger.info(
+                    #     f"Saved author info to database (db_path={args.db_path})."
+                    # )
             else:
                 logger.warning("No author info found.")
         elif args.ieee_command == "publist":
@@ -244,16 +202,17 @@ class IEEEPlugin(CLIPluginBase):
                 + json.dumps(json_safe(ids), ensure_ascii=False, indent=2)
             )
             if args.save_db and ids:
-                for pid in ids:
-                    # stub paper: check will be computed in db.save_paper based on fields (likely 0)
-                    db.save_paper(
-                        db.PaperMetaData(
-                            id=pid,
-                        ),
-                        db_path=args.db_path,
-                        strategy=getattr(args, "strategy", "AN"),
-                        logger=logger,
-                    )
+                logger.warning("Save to db is temporarily disabled.")
+                # for pid in ids:
+                #     # stub paper: check will be computed in db.save_paper based on fields (likely 0)
+                #     db.save_paper(
+                #         db.PaperMetaData(
+                #             id=pid,
+                #         ),
+                #         db_path=args.db_path,
+                #         strategy=getattr(args, "strategy", "AN"),
+                #         logger=logger,
+                #     )
         else:
             logger.error("No ieee sub-command specified. Use --help for usage.")
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 from playwright.sync_api import Browser, Page, ElementHandle
-import utils
+import utils as utils
 import T
 import typing
 import logging

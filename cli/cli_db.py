@@ -1,279 +1,14 @@
 import db
+import utils
 from .cli_plugin_base import CLIPluginBase
 from dataclasses import asdict
-from datetime import datetime  # added
-import re
-import copy
+from datetime import datetime
 from ieee import AuthorPage, PublicationPage
 from playwright.sync_api import sync_playwright
 import logging
-
-
-def to_dict(obj):
-    # convert dataclass/datetime/list/dict recursively to JSON-serializable
-    if obj is None:
-        return None
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    if hasattr(obj, "__dataclass_fields__"):
-        return to_dict(asdict(obj))
-    if isinstance(obj, dict):
-        return {k: to_dict(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple, set)):
-        return [to_dict(i) for i in obj]
-    if hasattr(obj, "__dict__"):
-        d = obj.__dict__.copy()
-        return {k: to_dict(v) for k, v in d.items()}
-    return obj
-
-
-def _parse_path(path: str):
-    # extract tokens inside [...] and convert numeric tokens to int, ':' stays as ':'
-    toks = re.findall(r"\[([^\]]*)\]", path)
-    res = []
-    for t in toks:
-        if t == ":":
-            res.append(":")
-        else:
-            if t.isdigit():
-                res.append(int(t))
-            else:
-                res.append(t)
-    return res
-
-
-def _add_path(mask: dict, tokens: list):
-    # set leaf to True to indicate keep/remove whole subtree
-    if not tokens:
-        return
-    key = tokens[0]
-    if key not in mask:
-        mask[key] = {}
-    if len(tokens) == 1:
-        mask[key] = True
-        return
-    if mask[key] is True:
-        # already whole subtree
-        return
-    _add_path(mask[key], tokens[1:])
-
-
-def _build_mask(paths: list) -> dict:
-    mask = {}
-    for p in paths or []:
-        toks = _parse_path(p)
-        if toks:
-            _add_path(mask, toks)
-    return mask
-
-
-def _apply_keep(obj, mask):
-    # if mask True -> keep whole obj
-    if mask is True:
-        return copy.deepcopy(obj)
-    if isinstance(obj, dict):
-        out = {}
-        for k, sub in mask.items():
-            # only keep keys specified in mask
-            if k in obj:
-                res = _apply_keep(obj[k], sub)
-                out[k] = res
-        return out
-    if isinstance(obj, list):
-        out = []
-        # support ':' for all elements
-        if ":" in mask:
-            sub = mask[":"]
-            for item in obj:
-                out.append(_apply_keep(item, sub))
-            return out
-        # or specific indices
-        for k, sub in mask.items():
-            if isinstance(k, int) and 0 <= k < len(obj):
-                out.append(_apply_keep(obj[k], sub))
-        return out
-    # primitive
-    return copy.deepcopy(obj)
-
-
-def _apply_exclude(obj, mask):
-    # if mask True -> remove whole object
-    if mask is True:
-        return None
-    if isinstance(obj, dict):
-        out = {}
-        for k, v in obj.items():
-            if k in mask:
-                # if submask True -> exclude entire key
-                if mask[k] is True:
-                    continue
-                # else recurse
-                res = _apply_exclude(v, mask[k])
-                if res is None:
-                    continue
-                out[k] = res
-            else:
-                # keep as is
-                out[k] = copy.deepcopy(v)
-        return out
-    if isinstance(obj, list):
-        # if mask has ':' handle all elements
-        if ":" in mask:
-            sub = mask[":"]
-            out = []
-            for item in obj:
-                res = _apply_exclude(item, sub)
-                if res is not None:
-                    out.append(res)
-            return out
-        # otherwise mask may contain indices to exclude/sub-filter
-        out = []
-        for idx, item in enumerate(obj):
-            if idx in mask:
-                sub = mask[idx]
-                if sub is True:
-                    # exclude this index
-                    continue
-                res = _apply_exclude(item, sub)
-                if res is not None:
-                    out.append(res)
-            else:
-                out.append(copy.deepcopy(item))
-        return out
-    # primitive
-    return copy.deepcopy(obj)
-
-
-def filter_structure(obj, spec: dict):
-    """
-    Filter a Python structure (dict/list/primitive) by spec:
-     spec example:
-      {"keep": ["[author_id]", "[authors][:][name]"]}
-      {"exclude": ["[authors][0]", "[abstract]"]}
-     Rules:
-      - If 'keep' present: result only contains fields specified by keep paths.
-      - Else if 'exclude' present: result contains everything except fields matched by exclude paths.
-      - Paths use bracket notation: [key], [index], [:] for all list elements.
-    """
-    if not isinstance(spec, dict) or not spec:
-        return copy.deepcopy(obj)
-    if "keep" in spec and spec.get("keep"):
-        mask = _build_mask(spec.get("keep"))  # type: ignore
-        return _apply_keep(obj, mask)
-    if "exclude" in spec and spec.get("exclude"):
-        mask = _build_mask(spec.get("exclude"))  # type: ignore
-        return _apply_exclude(obj, mask)
-    # nothing to do
-    return copy.deepcopy(obj)
-
-
-def _field_to_bracket(path: str) -> str:
-    """
-    Convert convenient dot/array notation to bracket path.
-    Examples:
-      "author_id" -> "[author_id]"
-      "authors.author_id" -> "[authors][author_id]"
-      "authors[].author_id" -> "[authors][:][author_id]"
-      "authors[0].name" -> "[authors][0][name]"
-      "authors[:].name" -> "[authors][:][name]"
-    """
-    parts = []
-    # split by '.' but keep any existing [...] tokens as part
-    tokens = []
-    buf = ""
-    for ch in path:
-        if ch == ".":
-            if buf != "":
-                tokens.append(buf)
-                buf = ""
-        else:
-            buf += ch
-    if buf != "":
-        tokens.append(buf)
-    for tok in tokens:
-        # handle token like name[], name[:], name[0]
-        if tok.endswith("[]"):
-            name = tok[:-2]
-            parts.append(f"[{name}]")
-            parts.append("[:]")
-        elif tok.endswith("[:]") or tok.endswith("[:"):
-            # allow authors[:] or authors[:]
-            name = tok.split("[", 1)[0]
-            parts.append(f"[{name}]")
-            parts.append("[:]")
-        elif "[" in tok and "]" in tok:
-            # keep as is, but ensure bracket positions are separate tokens
-            # e.g. authors[0] -> [authors][0]
-            name, rest = tok.split("[", 1)
-            index = rest.rstrip("]")
-            parts.append(f"[{name}]")
-            if index == ":":
-                parts.append("[:]")
-            elif index.isdigit():
-                parts.append(f"[{index}]")
-            else:
-                parts.append(f"[{index}]")
-        else:
-            parts.append(f"[{tok}]")
-    return "".join(parts)
-
-
-def _collect_paths(arg_list):
-    """
-    Normalize input: arg_list can be None, list of strings possibly comma-separated.
-    Return flattened list of bracket paths.
-    """
-    if not arg_list:
-        return []
-    out = []
-    for entry in arg_list:
-        if entry is None:
-            continue
-        # support comma-separated values in one arg
-        for part in entry.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            # if already looks like bracket path, keep
-            if part.startswith("["):
-                out.append(part)
-            else:
-                out.append(_field_to_bracket(part))
-    return out
-
-
-def parse_selection(s: str, max_index: int) -> list[int]:
-    """
-    Parse selection string like "1,2-4,9-10".
-    Empty string or None -> select all [1..max_index].
-    Returns sorted unique list of 1-based indices (clamped to [1, max_index]).
-    """
-    if s is None or s.strip() == "":
-        return list(range(1, max_index + 1))
-    parts = [p.strip() for p in s.split(",") if p.strip()]
-    indices = set()
-    for p in parts:
-        if "-" in p:
-            try:
-                a_str, b_str = p.split("-", 1)
-                a = int(a_str)
-                b = int(b_str)
-                if a > b:
-                    a, b = b, a
-                for i in range(max(1, a), min(max_index, b) + 1):
-                    indices.add(i)
-            except Exception:
-                # ignore invalid segment
-                continue
-        else:
-            try:
-                i = int(p)
-                if 1 <= i <= max_index:
-                    indices.add(i)
-            except Exception:
-                # ignore invalid token
-                continue
-    return sorted(indices)
+from cache import Cacher, make_cache_key
+from .params_mounter import mount_filtering_params
+from utils.objfilter import filter_structure, build_spec_from_args
 
 
 class DBPlugin(CLIPluginBase):
@@ -296,21 +31,7 @@ class DBPlugin(CLIPluginBase):
         )
         export_parser.add_argument("--db-path", type=str, help="Database path")
         # new export filtering options
-        export_parser.add_argument(
-            "--keep",
-            action="append",
-            help="Keep paths (dot or bracket notation). Can be repeated or comma-separated.",
-        )
-        export_parser.add_argument(
-            "--exclude",
-            action="append",
-            help="Exclude paths (dot or bracket notation). Can be repeated or comma-separated.",
-        )
-        export_parser.add_argument(
-            "--fields",
-            action="append",
-            help="Shorthand fields (dot notation) to keep, e.g. authors[].author_id",
-        )
+        mount_filtering_params(export_parser)
 
         # list
         list_parser = subparsers.add_parser("list", help="List authors or papers")
@@ -319,21 +40,7 @@ class DBPlugin(CLIPluginBase):
         )
         list_parser.add_argument("--db-path", type=str, help="Database path")
         # new list filtering options
-        list_parser.add_argument(
-            "--keep",
-            action="append",
-            help="Keep paths (dot or bracket notation). Can be repeated or comma-separated.",
-        )
-        list_parser.add_argument(
-            "--exclude",
-            action="append",
-            help="Exclude paths (dot or bracket notation). Can be repeated or comma-separated.",
-        )
-        list_parser.add_argument(
-            "--fields",
-            action="append",
-            help="Shorthand fields (dot notation) to keep, e.g. authors[].author_id",
-        )
+        mount_filtering_params(list_parser)
 
         # unchecked
         unchecked_parser = subparsers.add_parser(
@@ -364,23 +71,9 @@ class DBPlugin(CLIPluginBase):
         get_parser.add_argument("value", help="Query value")
         get_parser.add_argument("--db-path", type=str, help="Database path")
         # new get filtering options
-        get_parser.add_argument(
-            "--keep",
-            action="append",
-            help="Keep paths (dot or bracket notation). Can be repeated or comma-separated.",
-        )
-        get_parser.add_argument(
-            "--exclude",
-            action="append",
-            help="Exclude paths (dot or bracket notation). Can be repeated or comma-separated.",
-        )
-        get_parser.add_argument(
-            "--fields",
-            action="append",
-            help="Shorthand fields (dot notation) to keep, e.g. authors[].author_id",
-        )
+        mount_filtering_params(get_parser)
 
-        # complete (新增)
+        # complete
         complete_parser = subparsers.add_parser(
             "complete",
             help="Fetch and complete missing info for authors or papers (check != 1)",
@@ -395,6 +88,32 @@ class DBPlugin(CLIPluginBase):
             default="AN",
             help="Conflict resolution strategy when saving (AO=Always Old, AN=Always New, M=Manual)",
         )
+        complete_parser.add_argument(
+            "--start-year", type=int, help="Start year for published work list"
+        )
+        complete_parser.add_argument(
+            "--end-year", type=int, help="End year for published work list"
+        )
+
+        # tabpub: create stub paper rows (only id) for all publications of an author
+        tabpub_parser = subparsers.add_parser(
+            "tabpub",
+            help="Create stub paper rows (only id) for all publications of an author",
+        )
+        tabpub_parser.add_argument("--author-id", required=True, help="Author ID")
+        tabpub_parser.add_argument("--db-path", type=str, help="Database path")
+        tabpub_parser.add_argument(
+            "--start-year", type=int, help="Start year to filter publications"
+        )
+        tabpub_parser.add_argument(
+            "--end-year", type=int, help="End year to filter publications"
+        )
+        tabpub_parser.add_argument(
+            "--cache-ttl",
+            type=int,
+            default=None,
+            help="Cache TTL in seconds (optional) for publist",
+        )
 
     def __init__(self, logger=None):
         super().__init__(logger)
@@ -403,17 +122,9 @@ class DBPlugin(CLIPluginBase):
         import json
 
         # helper to build spec from args
-        def build_spec_from_args(args):
-            keep = _collect_paths(getattr(args, "keep", None) or []) + _collect_paths(
-                getattr(args, "fields", None) or []
-            )
-            exclude = _collect_paths(getattr(args, "exclude", None) or [])
-            spec = {}
-            if keep:
-                spec["keep"] = keep
-            elif exclude:
-                spec["exclude"] = exclude
-            return spec if spec else None
+
+        # create cacher for reusing fetched results
+        cacher = Cacher(default_ttl=3600)
 
         if args.db_command == "init":
             db.init_db(db_path=getattr(args, "db_path", None))
@@ -439,7 +150,7 @@ class DBPlugin(CLIPluginBase):
                 items = db.get_all_authors(db_path=db_path)
             else:
                 items = db.get_all_papers(db_path=db_path)
-            data = [to_dict(i) for i in items]
+            data = [utils.to_dict(i) for i in items]
             if spec:
                 data = [filter_structure(d, spec) for d in data]
             print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -489,12 +200,12 @@ class DBPlugin(CLIPluginBase):
 
             spec = build_spec_from_args(args)
             if isinstance(result, list):
-                data = [to_dict(r) for r in result]
+                data = [utils.to_dict(r) for r in result]
                 if spec:
                     data = [filter_structure(d, spec) for d in data]
                 print(json.dumps(data, ensure_ascii=False, indent=2))
             else:
-                data = to_dict(result)
+                data = utils.to_dict(result)
                 if spec:
                     data = filter_structure(data, spec)
                 print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -502,6 +213,8 @@ class DBPlugin(CLIPluginBase):
             db_path = getattr(args, "db_path", None)
             which = args.which
             strategy = getattr(args, "strategy", "AN")
+            start_year = getattr(args, "start_year", None)
+            end_year = getattr(args, "end_year", None)
             logger = self.logger or logging.getLogger(__name__)
 
             # collect targets
@@ -538,7 +251,7 @@ class DBPlugin(CLIPluginBase):
             selection_input = input(
                 "Select indices to complete (e.g. 1,2-4,9-10). Press Enter to select ALL: "
             ).strip()
-            indices = parse_selection(selection_input, len(targets))
+            indices = utils.parse_selection(selection_input, len(targets))
             if not indices:
                 print("No valid selection made, aborting.")
                 return
@@ -552,32 +265,86 @@ class DBPlugin(CLIPluginBase):
                     typ, idv, label = targets[i - 1]
                     try:
                         if typ == "author":
-                            logger.info(f"Fetching author {idv} ...")
-                            with AuthorPage(browser, idv, logger) as ap:
-                                ainfo = ap.get_author_info()
-                                # also fetch publist to make publication_ids complete
-                                try:
-                                    pub_ids = ap.get_published_work_id_list()
-                                except Exception:
-                                    pub_ids = []
-                                if ainfo:
+                            # try cache first (include year range in key)
+                            key = make_cache_key(
+                                "author",
+                                {
+                                    "author_id": idv,
+                                    "start_year": start_year,
+                                    "end_year": end_year,
+                                },
+                            )
+                            cached = cacher.load(key)
+                            if cached is not None:
+                                logger.info(f"Cache hit for author {idv}")
+                                ainfo = cached
+                                # ensure publication_ids present (if not, attempt to fetch publist)
+                                if not getattr(ainfo, "publication_ids", None):
+                                    try:
+                                        with AuthorPage(browser, idv, logger) as ap_tmp:
+                                            pub_ids = ap_tmp.get_published_work_id_list(
+                                                start_year=start_year, end_year=end_year
+                                            )
+                                    except Exception:
+                                        pub_ids = []
                                     try:
                                         ainfo.publication_ids = pub_ids
                                     except Exception:
                                         pass
-                                    db.save_or_update_author(
-                                        ainfo,
-                                        db_path=db_path,
-                                        strategy=strategy,
-                                        logger=logger,
-                                    )
-                                    results["done"].append((typ, idv))
-                                else:
-                                    results["failed"].append((typ, idv))
+                            else:
+                                logger.info(f"Fetching author {idv} ...")
+                                with AuthorPage(browser, idv, logger) as ap:
+                                    ainfo = ap.get_author_info()
+                                    try:
+                                        pub_ids = ap.get_published_work_id_list(
+                                            start_year=start_year, end_year=end_year
+                                        )
+                                    except Exception:
+                                        pub_ids = []
+                                    if ainfo:
+                                        try:
+                                            ainfo.publication_ids = pub_ids
+                                        except Exception:
+                                            pass
+                                        # cache the author object
+                                        try:
+                                            cacher.save(key, ainfo)
+                                            logger.debug(
+                                                f"Saved author {idv} to cache."
+                                            )
+                                        except Exception:
+                                            logger.debug(
+                                                "Failed to cache author.", exc_info=True
+                                            )
+                            if ainfo:
+                                db.save_or_update_author(
+                                    ainfo,
+                                    db_path=db_path,
+                                    strategy=strategy,
+                                    logger=logger,
+                                )
+                                results["done"].append((typ, idv))
+                            else:
+                                results["failed"].append((typ, idv))
                         else:  # paper
-                            logger.info(f"Fetching paper {idv} ...")
-                            pp = PublicationPage(browser, idv, logger)
-                            pinfo = pp.fetch_info()
+                            # try cache first
+                            key = make_cache_key("pub", {"publication_id": idv})
+                            cached = cacher.load(key)
+                            if cached is not None:
+                                logger.info(f"Cache hit for publication {idv}")
+                                pinfo = cached
+                            else:
+                                logger.info(f"Fetching paper {idv} ...")
+                                pp = PublicationPage(browser, idv, logger)
+                                pinfo = pp.fetch_info()
+                                if pinfo:
+                                    try:
+                                        cacher.save(key, pinfo)
+                                        logger.debug(f"Saved paper {idv} to cache.")
+                                    except Exception:
+                                        logger.debug(
+                                            "Failed to cache paper.", exc_info=True
+                                        )
                             if pinfo:
                                 db.save_paper(
                                     pinfo,
@@ -606,6 +373,91 @@ class DBPlugin(CLIPluginBase):
                 f"Failed ({len(results['failed'])}): {[f'{t} {i}' for t, i in results['failed']]})"
             )
 
+            return
+        elif args.db_command == "tabpub":
+            db_path = getattr(args, "db_path", None)
+            author_id = getattr(args, "author_id")
+            start_year = getattr(args, "start_year", None)
+            end_year = getattr(args, "end_year", None)
+            cache_ttl = getattr(args, "cache_ttl", None)
+            logger = self.logger or logging.getLogger(__name__)
+
+            # Try to reuse DB-stored publication_ids when no year filter is provided
+            pub_ids = []
+            if start_year is None and end_year is None:
+                aobj = db.get_author_by_id(author_id, db_path=db_path)
+                if aobj and getattr(aobj, "publication_ids", None):
+                    pub_ids = getattr(aobj, "publication_ids", []) or []
+                    logger.info(
+                        f"Using publication_ids from DB for author {author_id} ({len(pub_ids)} items)."
+                    )
+
+            # If no pub_ids from DB, try cache, otherwise fetch via AuthorPage
+            if not pub_ids:
+                key = make_cache_key(
+                    "publist",
+                    {
+                        "author_id": author_id,
+                        "start_year": start_year,
+                        "end_year": end_year,
+                    },
+                )
+                cached = cacher.load(key)
+                if cached is not None:
+                    logger.info(f"Cache hit for publist {author_id}")
+                    pub_ids = cached
+                else:
+                    logger.info(
+                        f"Fetching publication id list for author {author_id} ..."
+                    )
+                    playwright = sync_playwright().start()
+                    browser = playwright.chromium.launch(headless=False)
+                    try:
+                        with AuthorPage(browser, author_id, logger) as ap:
+                            pub_ids = ap.get_published_work_id_list(
+                                start_year=start_year, end_year=end_year
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Error fetching publist for author {author_id}: {e}",
+                            exc_info=True,
+                        )
+                        pub_ids = []
+                    finally:
+                        browser.close()
+                        playwright.stop()
+                    if pub_ids:
+                        try:
+                            cacher.save(key, pub_ids, ttl=cache_ttl)
+                            logger.debug(
+                                f"Saved publist for author {author_id} to cache."
+                            )
+                        except Exception:
+                            logger.debug("Failed to cache publist.", exc_info=True)
+
+            if not pub_ids:
+                print(f"No publications found for author {author_id}.")
+                return
+
+            # Insert stub papers (only id) into DB
+            inserted = 0
+            for pid in pub_ids:
+                try:
+                    # create minimal PaperMetaData; db.save_paper will insert a row with default fields
+                    db.save_paper(
+                        db.PaperMetaData(id=pid),
+                        db_path=db_path,
+                        strategy="AN",
+                        logger=logger,
+                    )
+                    inserted += 1
+                except Exception as e:
+                    logger.error(
+                        f"Failed to insert stub paper {pid}: {e}", exc_info=True
+                    )
+            print(
+                f"Processed {len(pub_ids)} publication IDs for author {author_id}, inserted/updated {inserted} stub rows."
+            )
             return
 
         else:

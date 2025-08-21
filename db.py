@@ -7,6 +7,10 @@ import logging
 from T import IEEEAuthor, PaperMetaData
 import utils
 
+raise NotImplementedError("SQlite3 based Database backend is deprecated.")
+# Switching to 2 backend, the duckdb one and the tinydb one, the current implementation will be removed in future versions.
+
+
 # get database path from environment variable
 DB_PATH = os.environ.get("DB_PATH", "ieee.db")
 

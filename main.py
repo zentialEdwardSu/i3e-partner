@@ -1,22 +1,19 @@
-from playwright.sync_api import sync_playwright
 import sys
 import argparse
 import logging
-from cli.cli_hello import HelloPlugin
-from cli.cli_db import DBPlugin
 from cli.cli_ieee import IEEEPlugin
 from cli.cli_cache import CachePlugin
 
 # Manually register plugins here
 plugins = {
-    "hello": HelloPlugin,
-    "db": DBPlugin,
+    # "hello": HelloPlugin,
+    # "db": DBPlugin,
     "ieee": IEEEPlugin,
     "cache": CachePlugin,
 }
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("I3E")
 
 
 def print_help():

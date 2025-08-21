@@ -1,9 +1,30 @@
+from dataclasses import asdict
+from datetime import datetime
 import random
 from playwright.sync_api import Page
 from playwright.sync_api import Error
 import typing
 
+
 T = typing.TypeVar("T")
+
+
+def to_dict(obj):
+    # convert dataclass/datetime/list/dict recursively to JSON-serializable
+    if obj is None:
+        return None
+    if isinstance(obj, datetime):
+        return obj.strftime("%d %B %Y")
+    if hasattr(obj, "__dataclass_fields__"):
+        return to_dict(asdict(obj))
+    if isinstance(obj, dict):
+        return {k: to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [to_dict(i) for i in obj]
+    if hasattr(obj, "__dict__"):
+        d = obj.__dict__.copy()
+        return {k: to_dict(v) for k, v in d.items()}
+    return obj
 
 
 def random_wait(page: Page, min_seconds=2, max_seconds=5):
@@ -71,3 +92,37 @@ def _compute_paper_check(paper):
         )
         else 0
     )
+
+
+def parse_selection(s: str, max_index: int) -> list[int]:
+    """
+    Parse selection string like "1,2-4,9-10".
+    Empty string or None -> select all [1..max_index].
+    Returns sorted unique list of 1-based indices (clamped to [1, max_index]).
+    """
+    if s is None or s.strip() == "":
+        return list(range(1, max_index + 1))
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    indices = set()
+    for p in parts:
+        if "-" in p:
+            try:
+                a_str, b_str = p.split("-", 1)
+                a = int(a_str)
+                b = int(b_str)
+                if a > b:
+                    a, b = b, a
+                for i in range(max(1, a), min(max_index, b) + 1):
+                    indices.add(i)
+            except Exception:
+                # ignore invalid segment
+                continue
+        else:
+            try:
+                i = int(p)
+                if 1 <= i <= max_index:
+                    indices.add(i)
+            except Exception:
+                # ignore invalid token
+                continue
+    return sorted(indices)
