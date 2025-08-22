@@ -9,10 +9,20 @@ def mount_sharing_params(parser: argparse.ArgumentParser):
 
 def mount_db_params(parser: argparse.ArgumentParser):
     """
-    Mount --save-db/--db-path to the given parser
+    Mount --save/--path to the given parser
     """
-    parser.add_argument("--save-db", action="store_true", help="Save to database")
-    parser.add_argument("--db-path", type=str, help="Database path")
+    parser.add_argument(
+        "--save",
+        choices=["json", "db"],
+        type=str,
+        default=None,
+        help="Save result to db or single json file",
+    )
+    parser.add_argument(
+        "--path",
+        type=str,
+        help="Path to save the file, if save db, it's the path to the db file, otherwise it will overwrite the path to the json file",
+    )
 
 
 def mount_strategy_params(parser: argparse.ArgumentParser):

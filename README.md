@@ -15,35 +15,38 @@ clone the repo, run `uv sync`(in case you have uv installed), or just install `p
 
 ## Usage
 
-Always initialize the local database first:
-
-```bash
-python main.py db init
-```
-
-You can set the database path via the environment variable `DB_PATH`. If not set, the default is `ieee.db`.
-
-There are 3 plugins supported so far:
+There are 2 plugins supported so far:
 1. `cache` — manage cache data (see `python main.py cache -h`)
-2. `db` — manage the database: init / export / search (see `python main.py db -h`)
-3. `ieee` — download publication or author information (see `python main.py ieee -h`)
+2. `ieee` — download publication or author information (see `python main.py ieee -h`)
 
 Always use `-h` on subcommands for detailed help. For example, `python main.py ieee pub -h` will show:
 
 ```bash
-usage: main.py ieee pub [-h] --publication-id PUBLICATION_ID [--save-db] [--db-path DB_PATH]
-                        [--cache-ttl CACHE_TTL] [--strategy {AO,AN,M}]
+usage: main.py ieee author [-h] --author-id AUTHOR_ID [--no-pub-list] [--start-year START_YEAR] [--end-year END_YEAR] [--cache-ttl CACHE_TTL] [--save {json,db}] [--path PATH]
+                           [--strategy {AO,AN,M}]
 
 options:
   -h, --help            show this help message and exit
-  --publication-id PUBLICATION_ID
-                        Publication ID
-  --save-db             Save to database
-  --db-path DB_PATH     Database path
+  --author-id AUTHOR_ID
+                        Author ID
+  --no-pub-list         Do not fetch published works' information list
+  --start-year START_YEAR
+                        Start year
+  --end-year END_YEAR   End year
   --cache-ttl CACHE_TTL
                         Cache TTL in seconds (optional)
+  --save {json,db}      Save result to db or single json file
+  --path PATH           Path to save the file, if save db, it's the path to the db file, otherwise it will overwrite the path to the json file
   --strategy {AO,AN,M}  Conflict resolution strategy when saving (AO=Always Old, AN=Always New, M=Manual)
 ```
+
+For example, to download author with ieee id `37290266200` and his publications between 2024 and 2025, then save to json, just run
+
+```bash
+python main.py ieee author --author-id 37290266200 --start-year 2024 --end-year 2025 --save json
+```
+
+> Notices: The script may exit abnormally due to failure to properly handle page load timeouts. This is currently being addressed, but thanks to the use of the cache module, you can re-run the command and resume work from the terminal.
 
 ## License
 

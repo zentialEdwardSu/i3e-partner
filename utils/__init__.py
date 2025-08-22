@@ -1,4 +1,4 @@
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import datetime
 import random
 from playwright.sync_api import Page
@@ -55,6 +55,14 @@ def retry_with_exponential_backoff(func, max_retries=3, base_delay=2):
                 f"Playwright NetWork Error, R: ({attempt + 1}/{max_retries}), W{delay}: {e}"
             )
             time.sleep(delay)
+
+
+def get_dataclass_field_count_by_type(cls) -> int:
+    """get total num of a given dataclass type"""
+    if hasattr(cls, "__dataclass_fields__"):
+        return len(fields(cls))
+    else:
+        raise TypeError(f"Class {cls} is not a dataclass")
 
 
 def _is_default(val):

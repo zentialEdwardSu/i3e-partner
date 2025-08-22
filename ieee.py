@@ -1,4 +1,5 @@
 from datetime import datetime
+import pdb
 from playwright.sync_api import Browser, Page, ElementHandle
 import utils as utils
 import T
@@ -154,10 +155,30 @@ class PublicationPage:
 
                 # here is a ugly patch, because there are different layout for maybe
                 # if the paper is in Early Access, if not, author picture will be displayed
-                qk = "col-14-24" if not ea else "col-24-24"
+                col_classes = ["col-24-24", "col-14-24"]
+                col_idx = -1
+                # try to find the right pattern
+                for i, col_class in enumerate(col_classes):
+                    el_author_name = el_authors[0].query_selector(f"div.{col_class} a")
+                    if el_author_name:
+                        col_idx = i
+                        self.logger.debug(f"Use pattern {col_class} at index {i}.")
+
                 for el_author in el_authors:
+                    if col_idx == -1:
+                        self.logger.warning(
+                            "No pattern can use to find author information."
+                        )
+                        break
+
                     author_info = T.IEEEAuthor(name="", affiliation=[], author_id="")
-                    el_author_name = el_author.query_selector(f"div.{qk} a")
+                    el_author_name, el_col = None, None
+
+                    # we find right pattern, apply them
+                    el_author_name = el_author.query_selector(
+                        f"div.{col_classes[col_idx]} a"
+                    )
+                    el_col = el_author.query_selector(f"div.{col_classes[col_idx]}")
                     if el_author_name:
                         author_info.name = el_author_name.inner_text()
                         author_id = el_author_name.get_attribute("href")
@@ -167,7 +188,6 @@ class PublicationPage:
                         self.logger.debug(
                             f"Author name: {author_info.name}, ID: {author_info.author_id}"
                         )
-                    el_col = el_author.query_selector(f"div.{qk}")
                     if el_col:
                         first_level_divs = el_col.query_selector_all(":scope > div")
                         for div in first_level_divs[1:]:
@@ -264,7 +284,7 @@ class AuthorPage:
                 assert btn is not None, "Year apply button not found."
                 btn.click()
                 self.logger.debug("Clicked year apply button.")
-                utils.random_wait(page, min_seconds=4, max_seconds=8)
+                utils.random_wait(page, min_seconds=4, max_seconds=10)
 
             while True:
                 divs = page.query_selector_all("div.List-results-items")

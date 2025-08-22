@@ -12,7 +12,7 @@ class Cacher:
     Key is hashed to produce safe filename.
     """
 
-    def __init__(self, cache_dir: Optional[str] = None, default_ttl: int = 3600):
+    def __init__(self, cache_dir: Optional[str] = None, default_ttl: int = 36000):
         self.cache_dir = cache_dir or os.path.join(os.getcwd(), ".ieee_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.default_ttl = default_ttl
