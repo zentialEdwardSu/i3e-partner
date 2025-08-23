@@ -4,11 +4,13 @@ import logging
 from cli.cli_ieee import IEEEPlugin
 from cli.cli_cache import CachePlugin
 from cli.cli_filter import FilterPlugin
+from cli.cli_json import JSONPlugin
 
 # Manually register plugins here
 plugins = {
     # "hello": HelloPlugin,
     # "db": DBPlugin,
+    "json": JSONPlugin,
     "filter": FilterPlugin,
     "ieee": IEEEPlugin,
     "cache": CachePlugin,
