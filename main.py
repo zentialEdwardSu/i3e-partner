@@ -3,11 +3,13 @@ import argparse
 import logging
 from cli.cli_ieee import IEEEPlugin
 from cli.cli_cache import CachePlugin
+from cli.cli_filter import FilterPlugin
 
 # Manually register plugins here
 plugins = {
     # "hello": HelloPlugin,
     # "db": DBPlugin,
+    "filter": FilterPlugin,
     "ieee": IEEEPlugin,
     "cache": CachePlugin,
 }

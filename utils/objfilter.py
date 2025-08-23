@@ -1,5 +1,6 @@
 import copy
 import re
+import typing
 
 
 def _parse_path(path: str):
@@ -119,7 +120,7 @@ def _apply_exclude(obj, mask):
     return copy.deepcopy(obj)
 
 
-def filter_structure(obj, spec: dict):
+def filter_structure(obj, spec: dict) -> typing.Tuple[typing.Any, int]:
     """
     Filter a Python structure (dict/list/primitive) by spec:
      spec example:
@@ -131,15 +132,15 @@ def filter_structure(obj, spec: dict):
       - Paths use bracket notation: [key], [index], [:] for all list elements.
     """
     if not isinstance(spec, dict) or not spec:
-        return copy.deepcopy(obj)
+        return copy.deepcopy(obj), 0
     if "keep" in spec and spec.get("keep"):
         mask = _build_mask(spec.get("keep"))  # type: ignore
-        return _apply_keep(obj, mask)
+        return _apply_keep(obj, mask), 1  # type: ignore
     if "exclude" in spec and spec.get("exclude"):
         mask = _build_mask(spec.get("exclude"))  # type: ignore
-        return _apply_exclude(obj, mask)
+        return _apply_exclude(obj, mask), 1  # type: ignore
     # nothing to do
-    return copy.deepcopy(obj)
+    return copy.deepcopy(obj), 0
 
 
 def build_spec_from_args(args):
@@ -187,8 +188,13 @@ def _field_to_bracket(path: str) -> str:
             name = tok[:-2]
             parts.append(f"[{name}]")
             parts.append("[:]")
-        elif tok.endswith("[:]") or tok.endswith("[:"):
-            # allow authors[:] or authors[:]
+        elif tok.endswith("[:]"):
+            # allow authors[:]
+            name = tok.split("[", 1)[0]
+            parts.append(f"[{name}]")
+            parts.append("[:]")
+        elif tok.endswith("[:") and not tok.endswith("[:]"):
+            # handle incomplete case like authors[:
             name = tok.split("[", 1)[0]
             parts.append(f"[{name}]")
             parts.append("[:]")

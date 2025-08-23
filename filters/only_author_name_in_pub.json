@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "exclude": [
+      "[publications][:][authors][:][check]",
+      "[publications][:][authors][:][publication_ids]",
+      "[publications][:][authors][:][affiliation]",
+      "[publications][:][authors][:][author_id]",
+      "[publications][:][check]"
+    ]
+  },
+  "metadata": {
+    "name": "only_author_name_in_pub",
+    "description": "remove authors' information except names, also remove check flags",
+    "created_at": "2025-08-23T13:47:46.820799"
+  }
+}
