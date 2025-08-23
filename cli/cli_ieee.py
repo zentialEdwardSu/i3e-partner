@@ -1,3 +1,4 @@
+import random
 import typing
 from T import IEEEAuthor, PaperMetaData
 from ieee import AuthorPage, PublicationPage
@@ -11,6 +12,7 @@ from .params_mounter import (
     mount_year_params,
     mount_sharing_params,
 )
+import time
 
 
 class IEEEPlugin(CLIPluginBase):
@@ -59,7 +61,20 @@ class IEEEPlugin(CLIPluginBase):
         cacher: Cacher,
         logger: logging.Logger,
         cache_ttl: typing.Optional[int] = None,
-    ):
+        hold: bool = True,
+    ) -> typing.Optional[PaperMetaData]:
+        """
+        get publication info with caching
+        Args:
+            publication_id: The ID of the publication to fetch
+            browser: The Playwright browser instance
+            cacher: The cache manager instance
+            logger: The logger instance
+            cache_ttl: Optional cache TTL
+            hold: Whether to hold on to avoid rate limit (default True)
+        Return:
+            The publication info
+        """
         pubinfo: PaperMetaData = PaperMetaData()
         key = make_cache_key("pub", {"publication_id": publication_id})
         cached = cacher.load(key)
@@ -68,19 +83,23 @@ class IEEEPlugin(CLIPluginBase):
             pubinfo = cached
         else:
             logger.info(f"Cache miss for publication {publication_id}, fetching")
+            if hold:
+                st = random.randint(20, 40)
+                logger.info(f"Wait {st} seconds before fetching to avoid rate limit.")
+                time.sleep(st)  # Sleep for 20-40 seconds
             pubpage = PublicationPage(browser, publication_id, logger)
             pubinfo = pubpage.fetch_info()  # type: ignore
             if pubinfo:
                 cacher.save(key, pubinfo, ttl=cache_ttl)
                 logger.debug("Saved publication info to cache.")
-        cacher.save(key, pubinfo, ttl=cache_ttl)
-        logger.debug(f"Saved publication {pubinfo.id} to cache.")
+
         return pubinfo
 
     def _run_pub(self, args, browser, cacher: Cacher, logger: logging.Logger):
         """Handle pub subcommand"""
+        logger.info(f"Fetching publication {args.publication_id}")
         pubinfo = self.get_one_pub_with_cache(
-            args.publication_id, browser, cacher, logger, args.cache_ttl
+            args.publication_id, browser, cacher, logger, args.cache_ttl, False
         )
         if pubinfo:
             # ensure check present (PublicationPage already computes, but guard)
@@ -144,7 +163,8 @@ class IEEEPlugin(CLIPluginBase):
         error_pubid: list[str] = []
         if download_pubs and ids:
             # fetch publication info for each ID
-            for pub_id in ids:
+            for i, pub_id in enumerate(ids):
+                logger.info(f"Fetching publication {i + 1}/{len(ids)}: {pub_id}")
                 pubinfo = self.get_one_pub_with_cache(
                     pub_id, browser, cacher, logger, ttl
                 )
@@ -179,19 +199,22 @@ class IEEEPlugin(CLIPluginBase):
             if args.save is not None:
                 logger.info("No console output when --save is used.")
                 return
+
+            author_dict = utils.to_dict(author_info)
             logger.info(
-                "Author info:\n"
-                + json.dumps(utils.to_dict(author_info), ensure_ascii=False, indent=2)
+                "Author info:\n" + json.dumps(author_dict, ensure_ascii=False, indent=2)
             )
 
+            ids_dict = utils.to_dict(ids)
             logger.info(
                 "Published work IDs:\n"
-                + json.dumps(utils.to_dict(ids), ensure_ascii=False, indent=2)
+                + json.dumps(ids_dict, ensure_ascii=False, indent=2)
             )
-            if not args.no_pub_list:
+            if download_pubs and pubs:
+                pubs_dict = utils.to_dict(pubs)
                 logger.info(
                     "Published works' information list:\n"
-                    + json.dumps(utils.to_dict(pubs), ensure_ascii=False, indent=2)
+                    + json.dumps(pubs_dict, ensure_ascii=False, indent=2)
                 )
 
         else:
