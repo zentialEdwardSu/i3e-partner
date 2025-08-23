@@ -48,6 +48,86 @@ python main.py ieee author --author-id 37290266200 --start-year 2024 --end-year 
 
 > Notices: The script may exit abnormally due to failure to properly handle page load timeouts. This is currently being addressed, but thanks to the use of the cache module, you can re-run the command and resume work from the terminal.
 
+## Use filter
+
+Filter is introduced to quickly clean up redundant keys in json files.
+
+```bash
+python main.py filter -h
+usage: main.py filter [-h] {create,apply,list} ...
+
+positional arguments:
+  {create,apply,list}  Filter sub-commands
+    create             Create a new filter
+    apply              Apply a saved filter
+    list               List available filters
+
+options:
+  -h, --help           show this help message and exit
+```
+
+### Filter Syntax
+
+Filter uses bracket notation to specify paths in JSON structures. There are two modes:
+
+- **Keep mode**: Only specified paths are retained in the result
+- **Exclude mode**: Specified paths are removed from the result
+
+#### Basic Syntax
+
+- `[key]` - Match a specific key in a dictionary
+- `[index]` - Match a specific index in an array (0-based)
+- `[:]` - Match all elements in an array
+- Paths can be chained: `[authors][:][name]`
+
+#### Examples
+
+**Dictionary access:**
+- `[public]` → Match the "public" key at the root of a dict
+- `[author][name]` → Match nested structure: `obj["author"]["name"]`
+
+**Array access:**
+- `[authors][0]` → Match the first element in the "authors" array
+- `[authors][:]` → Match all elements in the "authors" array
+- `[authors][:][name]` → Match the "name" field of every author
+
+**Convenient dot notation (automatically converted):**
+- `author.name` → Converts to `[author][name]`
+- `authors[].name` → Converts to `[authors][:][name]`
+- `authors[0].name` → Converts to `[authors][0][name]`
+
+#### Usage Examples
+
+**Create a filter to keep only author info:**
+```bash
+python main.py filter create --keep "[author_id],[author_name]" --name "author_basic"
+```
+
+**Create a filter to exclude abstracts and detailed metadata:**
+```bash
+python main.py filter create --exclude "[abstract],[detailed_metadata]" --name "no_abstract"
+```
+
+**Apply a saved filter:**
+```bash
+python main.py filter apply --filter-name "author_basic" --input data.json --output filtered.json
+```
+
+**Keep only names of all authors:**
+```bash
+python main.py filter create --keep "[authors][:][name]" --name "author_names_only"
+```
+
+**Exclude the first publication from each author:**
+```bash
+python main.py filter create --exclude "[authors][:][publications][0]" --name "skip_first_pub"
+```
+
+**Using pipe with stdin/stdout:**
+```bash
+cat data.json | python main.py filter apply --filter-name "author_basic" > filtered.json
+```
+
 ## License
 
 MIT — see the License file for details.
