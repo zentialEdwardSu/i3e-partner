@@ -13,3 +13,9 @@ wheels/
 # script cache and database
 .ieee_cache
 ieee.db
+
+# ignore all json files first
+*.json
+
+# but allow json files in filters directory
+!filters/*.json
