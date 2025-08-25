@@ -9,6 +9,19 @@ import typing
 T = typing.TypeVar("T")
 
 
+def parse_time_with_backoff(time_str: str) -> typing.Optional[datetime]:
+    """
+    Parse a date string with exponential backoff.
+    """
+    formats = ["%d %B %Y", "%B %Y", "%Y"]
+    for fmt in formats:
+        try:
+            return datetime.strptime(time_str, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def to_dict(obj):
     # convert dataclass/datetime/list/dict recursively to JSON-serializable
     if obj is None:

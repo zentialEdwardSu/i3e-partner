@@ -1,5 +1,4 @@
 from datetime import datetime
-import pdb
 from playwright.sync_api import Browser, Page, ElementHandle
 import utils as utils
 import T
@@ -136,11 +135,17 @@ class PublicationPage:
 
                 el_pub_date = page.query_selector("div.doc-abstract-pubdate")
                 if el_pub_date:
-                    date_str = utils.remove_none(el_pub_date.inner_text(), "")
-                    publication_info.publication_date = datetime.strptime(
-                        date_str.split(":")[-1].strip(),
-                        "%d %B %Y",
+                    date_str = (
+                        utils.remove_none(el_pub_date.inner_text(), "")
+                        .split(":")[-1]
+                        .strip()
                     )
+                    date = utils.parse_time_with_backoff(date_str)
+                    if not date:
+                        self.logger.warning(
+                            f"Failed to parse publication date: {date_str}, using now"
+                        )
+                    publication_info.publication_date = date or datetime.now()
                     self.logger.debug(
                         f"Publication date: {publication_info.publication_date}"
                     )
@@ -219,7 +224,7 @@ class AuthorPage:
         self.author_id = author_id
         self.url = f"https://ieeexplore.ieee.org/author/{author_id}?"
         self.logger = logger
-        self._page = None  # 缓存页面对象
+        self._page = None
 
     def _get_or_open_page(self):
         if self._page is None or self._page.is_closed():
