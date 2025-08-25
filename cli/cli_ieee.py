@@ -84,7 +84,7 @@ class IEEEPlugin(CLIPluginBase):
         else:
             logger.info(f"Cache miss for publication {publication_id}, fetching")
             if hold:
-                st = random.randint(20, 40)
+                st = random.randint(25, 35)
                 logger.info(f"Wait {st} seconds before fetching to avoid rate limit.")
                 time.sleep(st)  # Sleep for 20-40 seconds
             pubpage = PublicationPage(browser, publication_id, logger)
@@ -293,7 +293,7 @@ class IEEEPlugin(CLIPluginBase):
         browser = playwright.chromium.launch(headless=False)
 
         # create cacher instance (default ttl in seconds)
-        cacher = Cacher(default_ttl=3600)
+        cacher = Cacher(default_ttl=86400)
 
         try:
             if args.ieee_command == "pub":
