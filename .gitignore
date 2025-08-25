@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+*.exe
 
 # Virtual environments
 .venv
@@ -19,3 +20,11 @@ ieee.db
 
 # but allow json files in filters directory
 !filters/*.json
+
+# ignore all markdown files
+*.md
+
+# but allow markdown files in docs directory, CALUDE.md, README.md
+!docs/*.md
+!CLAUDE.md
+!README.md

@@ -1,0 +1,27 @@
+You will receive a JSON file containing a list of publications.
+Your task is to **classify these publications by research direction** and then **generate a Markdown file (.md)**, **not just print Markdown characters as plain text**.
+
+The Markdown file should follow this structure:
+
+1. **First-level headings (`#`)**: Represent the **main research directions**.
+
+   * For each main direction, write a short paragraph introducing and explaining its importance.
+   * Example: treat *Over-the-Air Computation* as a main direction, **not** just "Wireless Communication."
+
+2. **Second-level headings (`##`)**: Represent the **sub-directions** within each main direction.
+
+   * Provide a short introduction for each sub-direction.
+   * Example: within *Over-the-Air Computation*, sub-directions can be *Waveform Design* or *Beamforming*.
+
+3. **Publication listing**: Under each sub-direction, use an unordered list (`-`) to display the publications.
+   Each item must include:
+
+   * **Title** of the paper
+   * **Author list**
+   * **One or two key contributions** (summarized in your own words)
+
+4. **Output requirements**:
+
+   * Always **generate a Markdown file** with a `.md` extension (not just inline Markdown text).
+   * Choose a meaningful filename for the `.md` file.
+   * Do not omit any publications.
